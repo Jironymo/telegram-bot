@@ -13,8 +13,8 @@ class Data_handler:
     """
     def __init__(self, fpath):
         import csv
-        self._fpath = fpath
 
+        self._fpath = fpath
         # store header of the data file
         with open(self._fpath, 'r', newline='') as _csv_fdata:
             self._csv_reader = csv.reader(_csv_fdata)
@@ -37,7 +37,6 @@ class Data_handler:
 
     @property
     def data(self):
-        # return self.__repr__()
         return self._data_inm
 
     @data.setter
@@ -48,12 +47,25 @@ class Data_handler:
     def data(self):
         raise AttributeError('Can not access this method.')
 
-    def fetch_param(self, dependent_param, independent_param, value):
+    def glimpse(self):
+        return self._data_header
+    
+    def fetch_param(self, independent_param, value, dependent_param='price_doc'):
         """
         Expects name of the parameter to be fetched (*dependent_param*), 
-        the *value* for *independent_param* to be tested against.
+        the *value* for *independent_param* to be tested against.,
         """
-        pass
+        result_list = [dict_line[dependent_param] for dict_line in self._data_inm if dict_line[independent_param] == value]
+        try:
+            avg_indep_param = sum(result_list)/len(result_list)
+            print(f"""
+            There are {len(result_list)} lines with {independent_param}={value}. 
+            Avg price is {avg_indep_param}.""")
+        except ZeroDivisionError:
+            print(f'No lines with {independent_param}={value}')
+            
+
+            
 
     def append_entry(self, param_dict):
         """
@@ -66,4 +78,7 @@ class Data_handler:
 
 homer = Data_handler('housing_data/train.csv')
 
-print(homer.data)
+for elem in homer.glimpse():
+    print(elem)
+
+print(homer.fetch_param('big_church_count_3000', 2))
