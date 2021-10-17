@@ -1,89 +1,226 @@
-# general bot-related import
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, commandhandler
-
-# user-defined functios and database management
-import constants
-import bot_funcs as funcs
-import data_handler
-
+"""
+First, a few callback functions are defined. Then, those functions are passed to
+the Dispatcher and registered at their respective places.
+Then, the bot is started and runs until we press Ctrl-C on the command line.
+Usage:
+Example of a bot-user conversation using ConversationHandler.
+Send /start to initiate the conversation.
+Press Ctrl-C on the command line or send a signal to the process to stop the
+bot.
+"""
 
 import logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                     level=logging.INFO)
+from typing import Dict
+
+from telegram import ReplyKeyboardMarkup, Update, ReplyKeyboardRemove
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    MessageHandler,
+    Filters,
+    ConversationHandler,
+    CallbackContext,
+)
+# user-defined functions and constants
+from data_handler import Data_handler
+from constants import BOT_TOKEN, DB_PATH # нужно сюда поставить токен бота и путь к файлу с БД
 
 
-print('Bot starterd...')
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
 
-def start_command(update, context):
-    # context.bot.send_message(chat_id=update.effective_chat.id, text="I'm a bot, please talk to me!")
-    update.message.reply_text("I'm a real estate analyzing bot. Use /help to find out what I can do for you.")
+logger = logging.getLogger(__name__)
 
-def help_command(update, context):
-    # использую логику не из офф. источника, а: 
-    # https://www.youtube.com/watch?v=PTAkiukJK7E
-    # говорит, что контекст можно уже не предоставлять.
-    update.message.reply_text("""
-    I can do 2 things: 
-    1. Given a certain parameter or set of parameters, return the corresponding price of a real estate in Moscow.
-    Type /get_price *parameter* to use this option and follow the instructions. 
-    2. Make a new entry into the database.
-    Type /insert_entry to use this option and follow the instructions.
-    """)
+CHOOSING, TYPING_VAL, TYPING_PARAM = range(3)
 
-def get_price_command(update, context):
-    """
-    when called, the function prints a list of params available for fetching.
-    a user is then expected to provide param name and value in two consecutive messages. 
-    """
-    pass
+start_keyboard = [
+    ['Fetch data', 'Insert data'],
+    ['Done'],
+]
+start_markup = ReplyKeyboardMarkup(start_keyboard, one_time_keyboard=True)
 
-    # TODO think about relating message input to the command handler as in BotFather
-    # Start a conversation consecutively asking user for param and value 
+body_keyboard = [
+    ['Proceed with a new param'],
+    ['Done'],
+]
+body_markup = ReplyKeyboardMarkup(body_keyboard, one_time_keyboard=True)
+
+# Add a custom db wrapper
+db = Data_handler(DB_PATH)
+
+def udata_to_str(user_data: Dict[str, str]) -> str:
+    """Helper function for formatting the gathered user info."""
+    facts = [f'{key} : {value}' for key, value in user_data.items()]
+    return "\n".join(facts).join(['\n', '\n'])
+
+
+def start(update: Update, context: CallbackContext) -> int:
+    """Start the conversation and ask user to choose an action."""
     update.message.reply_text(
-    """
-    Please provide one of the following params to get the corresponding price: 
-    {data_handler.param_list} 
-    """)
+        "Hi! Homer bot is here, duh.\n"
+        "I can fetch you deal price based on params you provide or update the database with your data.\n"
+        "What do you want?",
+        reply_markup=start_markup,
+    )
+    context.user_data['param_dict'] = {}
 
-def insert_entry_command(update, context):
-    
+    return CHOOSING
+
+def initiate_fetch(update: Update, context: CallbackContext) -> int:
+    """Invite user to provide an *independent param*."""
     update.message.reply_text(
-    """
-    when called, the function prints a list of params required to be filled in order to put a new entry in DB.
-    a conversation with the user is then started in order to specify the param values 
-    """)
-    pass
-    # TODO consecutively parse param names and values from user 
+    "Alright, please send me the name of the parameter first:")
+    context.user_data['action'] = 'Fetch'
 
-def handle_message(update, context):
+    return TYPING_PARAM
+
+
+def get_param_name(update: Update, context: CallbackContext) -> int:
+    """Ask the user for a name of the *independent param*."""
     text = update.message.text
-    # this is the place to decide whether the update is related to the get_price or insert_entry commands
-    response = funcs.sample_responses(text)
-    update.message.reply_text(response)
+    context.user_data['choice'] = text
+    # place to hold user data input 
+    update.message.reply_text(f'Your param is {text.lower()}? Please, provide its value.')
 
-def error(update, context):
-    print(f"Update {update} caused error {context.error}")
+    return TYPING_VAL
 
-def main():
-    updater = Updater(token=constants.BOT_TOKEN)
-    # initialize dispatcher
-    dp = updater.dispatcher
 
-    # add general commands handler to the dispatcher
-    dp.add_handler(CommandHandler('start', start_command))
-    dp.add_handler(CommandHandler('help', help_command))
+def get_param_val(update: Update, context: CallbackContext) -> int:
+    """Store info provided by user and ask for the next param if needed."""
+    user_data = context.user_data
+    text = update.message.text
+    param_name = user_data['choice']
+    user_data['param_dict'][param_name] = text
+    del user_data['choice']
+
+    # TODO delete this print after debug
+    print(user_data)
     
-    # add specific commands hanlder to the dispatcher
-    dp.add_handler(CommandHandler('get_price', get_price_command))
-    dp.add_handler(CommandHandler('insert_entry', insert_entry_command))
+    if context.user_data['action'] == 'Fetch':
+        try:
+            result_dict = db.get_param(user_data['param_dict'])
+        except KeyError:
+            update.message.reply_text(
+                "Neat! Just so you know, below are the params and vals you entered:"
+                f"{udata_to_str(user_data['param_dict'])}\n"
+                "No such parameter in db."
+                ,
+                reply_markup=body_markup,
+            )
+            # delete wrong entry from the user_data
+            del user_data['param_dict'][param_name]
 
-    # add message reply handler
-    dp.add_handler(MessageHandler(Filters.text, handle_message))
+            return CHOOSING
 
-    # add error handler
-    dp.add_error_handler(error)
+        # TODO delete this print after debug
+        print(user_data)
+        
+        try:
+            avg_param = sum(result_dict.values())/len(result_dict)
+        except ZeroDivisionError:
+            avg_param = 'NULL'
 
+        update.message.reply_text(
+            "Neat! Just so you know, below are the params and vals you entered:"
+            f"{udata_to_str(user_data['param_dict'])}"
+            f"There are {len(result_dict)} lines matching params provided."
+            f"Corresponding average price is {avg_param}.\n"
+            "You can tell me more, or change the nature of interaction."
+            ,
+            reply_markup=body_markup,
+        )
+
+        if len(result_dict) <= 17:
+            update.message.reply_text(
+                "Below are the ids matching the pattern:"
+                f"{udata_to_str(result_dict)}"
+            )
+
+        return CHOOSING
+
+    # TODO add messages to user
+    # TODO refactor the code into multiple sub functions
+    if context.user_data['action'] == 'Insert':
+        try:
+            db.append_entry(context.user_data['param_dict'])
+        except ValueError:
+            update.message.reply_text(
+            "Neat! Just so you know, below are the params and vals you entered:"
+            f"{udata_to_str(user_data['param_dict'])}\n"
+            "db has no such column."
+            ,
+            reply_markup=body_markup,
+        )
+        return CHOOSING
+
+def initiate_insert(update: Update, context: CallbackContext) -> int:
+    """Ask the user for a description of a custom param_name."""
+    update.message.reply_text(
+    "Alright, please send me the name of the parameter first:")
+    context.user_data['action'] = 'Insert'
+
+    return TYPING_PARAM
+
+
+def done(update: Update, context: CallbackContext) -> int:
+    """Display the gathered info and end the conversation."""
+    user_data = context.user_data
+    if 'choice' in user_data:
+        del user_data['choice']
+
+    update.message.reply_text(
+        f"Below are the data you provided: {udata_to_str(user_data['param_dict'])} Until next time!",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    user_data.clear()
+    return ConversationHandler.END
+
+# TODO change the default text
+def main() -> None:
+    """Run the bot."""
+    # Create the Updater and pass it your bot's token.
+    updater = Updater(BOT_TOKEN)
+
+    # Get the dispatcher to register handlers
+    dispatcher = updater.dispatcher
+
+    # Add conversation handler with the states CHOOSING, TYPING_PARAM and TYPING_VAL
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            CHOOSING: [
+                MessageHandler(
+                    Filters.regex('^(Fetch data)$') | Filters.regex('^Proceed with a new param$'), 
+                    initiate_fetch),
+                MessageHandler(Filters.regex('^Insert data$'), initiate_insert),
+                # MessageHandler(Filters.regex('^Proceed with a new param$'), initiate_fetch),
+            ],
+            TYPING_PARAM: [
+                MessageHandler(Filters.text & ~(Filters.command | Filters.regex('^Done$')), get_param_name)
+            ],
+            TYPING_VAL: [
+                MessageHandler(
+                    Filters.text & ~(Filters.command | Filters.regex('^Done$')),
+                    get_param_val,
+                )
+            ],
+        },
+        fallbacks=[MessageHandler(Filters.regex('^Done$'), done)],
+    )
+
+    dispatcher.add_handler(conv_handler)
+
+    # Start the Bot
     updater.start_polling()
+
+    # Run the bot until you press Ctrl-C or the process receives SIGINT,
+    # SIGTERM or SIGABRT. This should be used most of the time, since
+    # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
 
-main()
+
+if __name__ == '__main__':
+    main()
