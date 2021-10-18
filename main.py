@@ -79,7 +79,7 @@ def initiate_fetch(update: Update, context: CallbackContext) -> int:
 
 def get_param_name(update: Update, context: CallbackContext) -> int:
     """Ask the user for a name of the *independent param*."""
-    text = update.message.text
+    text = update.message.text.strip()
     context.user_data['choice'] = text
     # place to hold user data input 
     update.message.reply_text(f'Your param is {text.lower()}? Please, provide its value.')
@@ -90,7 +90,7 @@ def get_param_name(update: Update, context: CallbackContext) -> int:
 def get_param_val(update: Update, context: CallbackContext) -> int:
     """Store info provided by user and ask for the next param if needed."""
     user_data = context.user_data
-    text = update.message.text
+    text = update.message.text.strip()
     param_name = user_data['choice']
     user_data['param_dict'][param_name] = text
     del user_data['choice']
@@ -132,7 +132,7 @@ def get_param_val(update: Update, context: CallbackContext) -> int:
             reply_markup=body_markup,
         )
 
-        if len(result_dict) <= 17:
+        if len(result_dict) <= 10:
             update.message.reply_text(
                 "Below are the ids matching the pattern:"
                 f"{udata_to_str(result_dict)}"
@@ -147,13 +147,22 @@ def get_param_val(update: Update, context: CallbackContext) -> int:
             db.append_entry(context.user_data['param_dict'])
         except ValueError:
             update.message.reply_text(
-            "Neat! Just so you know, below are the params and vals you entered:"
-            f"{udata_to_str(user_data['param_dict'])}\n"
-            "db has no such column."
-            ,
-            reply_markup=body_markup,
-        )
+                "Neat! Just so you know, below are the params and vals you entered:"
+                f"{udata_to_str(user_data['param_dict'])}\n"
+                "db has no such column."
+                ,
+                reply_markup=body_markup,
+            )
+        else:
+            update.message.reply_text(
+                "Neat! Just so you know, below are the params and vals you entered:"
+                f"{udata_to_str(user_data['param_dict'])}"
+                "You can tell me more, or change the nature of interaction."
+                ,
+                reply_markup=body_markup,
+            )
         return CHOOSING
+
 
 def initiate_insert(update: Update, context: CallbackContext) -> int:
     """Ask the user for a description of a custom param_name."""
@@ -171,12 +180,13 @@ def done(update: Update, context: CallbackContext) -> int:
         del user_data['choice']
 
     update.message.reply_text(
-        f"Below are the data you provided: {udata_to_str(user_data['param_dict'])} Until next time!",
+        f"Below is the data you provided: {udata_to_str(user_data['param_dict'])} Until next time!",
         reply_markup=ReplyKeyboardRemove(),
     )
 
     user_data.clear()
     return ConversationHandler.END
+
 
 # TODO change the default text
 def main() -> None:
